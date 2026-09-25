@@ -1,0 +1,539 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Touring AI voice app - backend. POST /ask resolves the rider's address and
+  forwards the question to the AgentCore agent, which owns the conversation
+  and web search; POST /ask-audio does the same for a recording, transcribing
+  it first and speaking the answer back; GET /health is a liveness check.
+  Access is controlled by an API key with a usage plan (see
+  docs/01_architecture.md sections 7-9).
+
+# Naming convention: <resource-type>-trg-<env>-<identifier>
+#   trg = touring, env = dev/prod, identifier = "main" for a single/primary
+#   resource, otherwise a purpose name (e.g. "ask").
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Deployment environment, used in resource names.
+
+  AgentRuntimeArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /trg/dev/agent-runtime-arn
+    Description: >
+      NAME of the SSM parameter holding the AgentCore runtime ARN - not the ARN
+      itself. CloudFormation reads the parameter and hands the value to the
+      Lambdas, so no account id is ever committed or passed on a command line.
+
+      ⚠️ The Agent must be deployed first: it is what writes this parameter
+      (Agent/buildspec.yml). A missing parameter fails the deploy with
+      "Parameter /trg/... not found", which means exactly that.
+
+      ⚠️ Cross-region ImportValue is not an option here. The AgentCore stack
+      does export the runtime ARN, but it lives in us-east-1 while this stack
+      is in Tokyo, and CloudFormation exports do not cross regions. SSM is read
+      through the API, so the region is just an argument.
+
+  AgentRegion:
+    Type: String
+    Default: us-east-1
+    Description: >
+      Region of the AgentCore runtime. Not this stack's region: the runtime is
+      pinned to us-east-1 by the web-search connector (docs/01 section 6).
+
+  DailyQuota:
+    Type: Number
+    Default: "2000"
+    Description: >
+      Requests allowed per API key per day. ⚠️ This counts every call, not
+      every question: one question is a POST plus roughly ten GET polls while
+      the answer is generated (docs/01a). 2000/day is therefore on the order of
+      180 questions a day - far more than a rider asks, but low enough that a
+      leaked key cannot run up an unbounded Bedrock bill.
+
+  ThrottleRate:
+    Type: Number
+    Default: "5"
+    Description: >
+      Steady-state requests per second per API key. ⚠️ Must stay above the
+      app's polling rate: it polls once a second while waiting (App/src/app/
+      index.tsx POLL_STEPS), so a rate of 1 would throttle the rider's own
+      question.
+
+  ThrottleBurst:
+    Type: Number
+    Default: "10"
+    Description: >
+      Requests allowed in a momentary spike per API key. Covers a question
+      being submitted while a previous poll is still in flight.
+
+  AudioRetentionDays:
+    Type: Number
+    Default: "1"
+    Description: >
+      How long recordings and synthesised answers stay in S3. ⚠️ Both are
+      consumed within a minute - the recording by Transcribe, the answer by one
+      playback - so this is slack for a retry, not retention. Kept short
+      because a recording is the rider's voice and an answer names where they
+      were (docs/01_architecture.md section 7). One day is the minimum a
+      lifecycle rule can express.
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 128
+    Runtime: python3.13
+
+Resources:
+  # API Gateway (single -> "main")
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "apigw-trg-${Environment}-main"
+      StageName: Prod
+      # ⚠️ The only thing standing between this API and anyone who learns its
+      # URL - every call spends money on Bedrock. An IP allow-list used to do
+      # this job, but a rider's phone changes address constantly (that is the
+      # normal case, not the exception), so the key replaced it outright.
+      #
+      # ApiKeyRequired here makes the key mandatory on EVERY method, including
+      # /health. Endpoints opt out individually rather than opting in, so a new
+      # endpoint is protected by default - forgetting to add auth cannot leave
+      # a hole.
+      # ⚠️ Without this, a multipart upload arrives corrupted rather than
+      # missing - API Gateway treats the body as text and mangles the audio,
+      # which looks like a bad recording instead of a configuration mistake.
+      BinaryMediaTypes:
+        - "multipart/form-data"
+      Auth:
+        ApiKeyRequired: true
+        # ⚠️ NONE, not PER_API: SAM's usage plan builds the key too, and offers
+        # no way to name it - it exposes only Enabled and StageKeys, so the key
+        # comes out as "stack--RestA-<random>", which is neither readable nor
+        # the naming convention below. The plan, key and link are declared
+        # explicitly further down instead.
+        UsagePlan:
+          CreateUsagePlan: NONE
+
+  # Audio, both directions: the rider's recording on the way in (batch
+  # transcription reads its input from S3, which is why this bucket exists at
+  # all) and the synthesised answer on the way out.
+  AudioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "s3-trg-${Environment}-audio-${AWS::AccountId}"
+      # Nothing here is ever meant to be public. The app reaches the answer
+      # through a presigned URL, which needs no public access whatsoever.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          # ⚠️ Recordings are the rider's voice and answers name where they
+          # are, so neither is kept. Everything here is consumed within a
+          # minute; the days are slack, not retention.
+          - Id: DeleteAudioPromptly
+            Status: Enabled
+            ExpirationInDays: !Ref AudioRetentionDays
+          # A failed multipart upload otherwise sits there being billed for
+          # storage nothing can read.
+          - Id: AbortIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  # The three resources SAM would otherwise generate for us. Declared by hand
+  # so the key gets a name that follows the convention (SAM cannot set one).
+  ApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    # The stage has to exist before a plan can point at it.
+    DependsOn: RestApiProdStage
+    Properties:
+      UsagePlanName: !Sub "usageplan-trg-${Environment}-main"
+      Description: >
+        Per-key limits. Sized for one rider polling for answers, not for the
+        number of questions asked - see the DailyQuota parameter.
+      ApiStages:
+        - ApiId: !Ref RestApi
+          Stage: !Ref RestApiProdStage
+      Quota:
+        Limit: !Ref DailyQuota
+        Period: DAY
+      Throttle:
+        RateLimit: !Ref ThrottleRate
+        BurstLimit: !Ref ThrottleBurst
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: RestApiProdStage
+    Properties:
+      Name: !Sub "apikey-trg-${Environment}-main"
+      Description: >
+        The rider's key, typed into the app's settings screen. ⚠️ Its VALUE is
+        generated by API Gateway and never appears in this template or in the
+        stack outputs - read it with the command in Backend/README.md.
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref RestApi
+          StageName: !Ref RestApiProdStage
+
+  # Without this the key exists but counts against no plan, which means no
+  # quota and no throttle - the limits would silently not apply.
+  ApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan
+
+  # ⚠️ Transcribe writes the transcript itself, after the Lambda that started
+  # the job has already returned - its credentials are long gone by then, so
+  # the service needs a role of its own to reach the bucket.
+  #
+  # The alternative is to omit OutputBucketName and let the transcript land in
+  # a service-managed bucket. That is rejected deliberately: the transcript is
+  # the rider speaking, and in AWS's bucket it cannot be deleted except by
+  # raising a support case, nor covered by the lifecycle rule below.
+  TranscribeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "role-trg-${Environment}-transcribe"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: transcribe.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              # Confused-deputy guard: without it, any account able to name
+              # this role in a job could have Transcribe write into it.
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:transcribe:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: ReadAudioWriteTranscript
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Reading the recording it was asked to transcribe...
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt AudioBucket.Arn
+                  - !Sub "${AudioBucket.Arn}/audio/*"
+              # ...and writing the transcript back beside it.
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${AudioBucket.Arn}/transcripts/*"
+
+  # Single table for the whole app - see docs/03_dynamodb_table.md for why one
+  # table holds every entity type, and how pk/sk distinguish them.
+  #
+  # AWS::DynamoDB::Table rather than SAM's SimpleTable: the latter takes only a
+  # partition key, so it cannot express the sort key or the TTL this design
+  # needs.
+  MainTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "dynamodb-trg-${Environment}-main"
+      # On-demand: a rider asks questions in bursts, so there is no sensible
+      # capacity to provision.
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      # Answers can name places the rider has been, so they are not kept around
+      # (docs/03_dynamodb_table.md section 4).
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  # Questions waiting to be answered. The queue is what takes the agent's
+  # 10-25s out of the API Gateway request, which is capped at 29s.
+  AskQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "sqs-trg-${Environment}-ask"
+      # ⚠️ Must exceed the worker's own Timeout (120s), or SQS redelivers a
+      # message that is still being processed - which would call the agent
+      # twice and bill twice. See docs/03_dynamodb_table.md section 4.
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AskDeadLetterQueue.Arn
+        # Two retries, then park it. A question that failed three times will
+        # not start working on the fourth.
+        maxReceiveCount: 3
+
+  # Failures land here instead of vanishing silently.
+  AskDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "sqs-trg-${Environment}-ask-dlq"
+      # Long enough to notice and investigate.
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  # Lambda for the /ask endpoint (may grow -> purpose name "ask")
+  AskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lambda-trg-${Environment}-ask"
+      # <CodeUri>/<Handler>: src/handlers/ask.py -> handler()
+      CodeUri: src/
+      Handler: handlers/ask.handler
+      # Only resolves the address and queues the question now, so it no longer
+      # waits on the agent. Kept above the default because reverse-geocoding
+      # plus a cold start still needs more than 10s.
+      Timeout: 30
+      Environment:
+        Variables:
+          # Amazon Location is called in this stack's own region.
+          GEO_REGION: !Ref AWS::Region
+          TABLE_NAME: !Ref MainTable
+          QUEUE_URL: !Ref AskQueue
+      Policies:
+        # Reverse-geocoding the rider's position. geo-places has no per-resource
+        # ARN to scope to, so the resource is "*" - the action itself is the
+        # narrow part.
+        - Statement:
+            - Effect: Allow
+              Action: geo-places:ReverseGeocode
+              Resource: "*"
+        - DynamoDBWritePolicy:
+            TableName: !Ref MainTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AskQueue.QueueName
+      Events:
+        Ask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ask
+            Method: post
+            # Inherits ApiKeyRequired from the API's Auth block above.
+
+  # The voice counterpart of AskFunction. It cannot queue the question the way
+  # that one does: batch transcription returns before there is a transcript, so
+  # TranscribeDoneFunction picks up where this leaves off.
+  AskAudioFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lambda-trg-${Environment}-ask-audio"
+      CodeUri: src/
+      Handler: handlers/ask_audio.handler
+      # Uploading a recording and starting a job, no waiting on either.
+      Timeout: 30
+      # Holds the whole recording in memory while parsing the multipart body.
+      MemorySize: 512
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MainTable
+          QUEUE_URL: !Ref AskQueue
+          AUDIO_BUCKET: !Ref AudioBucket
+          TRANSCRIBE_ROLE_ARN: !GetAtt TranscribeRole.Arn
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref AudioBucket
+        - DynamoDBWritePolicy:
+            TableName: !Ref MainTable
+        - Statement:
+            - Effect: Allow
+              Action: transcribe:StartTranscriptionJob
+              # Transcribe jobs have no ARN to scope to before they exist.
+              Resource: "*"
+            # Handing Transcribe the role it writes the transcript with.
+            # Scoped to that one role, so this cannot pass anything else.
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt TranscribeRole.Arn
+              Condition:
+                StringEquals:
+                  iam:PassedToService: transcribe.amazonaws.com
+      Events:
+        AskAudio:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            # ⚠️ /ask-audio, not /ask/audio: the latter collides with
+            # /ask/{requestId}, where "audio" is a valid requestId.
+            Path: /ask-audio
+            Method: post
+            # Inherits ApiKeyRequired from the API's Auth block above.
+
+  # Where the recorded path rejoins the typed one. Runs when Transcribe
+  # finishes, builds the same prompt AskFunction builds, and queues it.
+  TranscribeDoneFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lambda-trg-${Environment}-transcribe-done"
+      CodeUri: src/
+      Handler: handlers/transcribe_done.handler
+      # Reverse-geocoding happens here for a recorded question, so it needs the
+      # same headroom AskFunction has.
+      Timeout: 30
+      Environment:
+        Variables:
+          GEO_REGION: !Ref AWS::Region
+          TABLE_NAME: !Ref MainTable
+          QUEUE_URL: !Ref AskQueue
+          AUDIO_BUCKET: !Ref AudioBucket
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: geo-places:ReverseGeocode
+              Resource: "*"
+        - S3ReadPolicy:
+            BucketName: !Ref AudioBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MainTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AskQueue.QueueName
+      Events:
+        TranscriptionFinished:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.transcribe
+              detail-type:
+                - Transcribe Job State Change
+              detail:
+                # FAILED is subscribed to as well: without it a failed job
+                # leaves the app polling a record nothing will ever move.
+                TranscriptionJobStatus:
+                  - COMPLETED
+                  - FAILED
+            # ⚠️ This matches EVERY Transcribe job in the account and region,
+            # not just this app's - the event carries no field to filter the
+            # job name on. Harmless today, since nothing else here uses
+            # Transcribe, and handlers/transcribe_done.py returns early when
+            # the job name matches no record of ours. That check is what makes
+            # the broad pattern safe; do not remove it.
+
+  # Where the waiting actually happens. Invoked from the queue rather than API
+  # Gateway, so the agent's 10-25s no longer counts against the 29s ceiling.
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lambda-trg-${Environment}-worker"
+      CodeUri: src/
+      Handler: handlers/worker.handler
+      # Well clear of the 25.5s worst case measured so far, and deliberately
+      # below the queue's 180s visibility timeout.
+      Timeout: 120
+      Environment:
+        Variables:
+          AGENT_ARN: !Ref AgentRuntimeArn
+          AGENT_REGION: !Ref AgentRegion
+          TABLE_NAME: !Ref MainTable
+          AUDIO_BUCKET: !Ref AudioBucket
+      Policies:
+        # Synthesising the answer as soon as it exists, so playback does not
+        # wait on Polly (lib/speech.py).
+        - Statement:
+            - Effect: Allow
+              Action: polly:SynthesizeSpeech
+              # Polly's voices are not per-account resources to scope to.
+              Resource: "*"
+        - S3WritePolicy:
+            BucketName: !Ref AudioBucket
+        # Without this the call comes back as AccessDenied. Scoped to the one
+        # runtime; the wildcard suffix covers its /runtime-endpoint/* children,
+        # which is what invoke_agent_runtime actually targets.
+        - Statement:
+            - Effect: Allow
+              Action: bedrock-agentcore:InvokeAgentRuntime
+              Resource:
+                - !Ref AgentRuntimeArn
+                - !Sub "${AgentRuntimeArn}/*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MainTable
+      Events:
+        AskQueued:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AskQueue.Arn
+            # ⚠️ One question per invocation. The default of 10 would put
+            # 10 x ~25s of agent calls inside one 120s timeout.
+            BatchSize: 1
+
+  # What the app polls while it waits. Reads the table; never calls the agent.
+  ResultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lambda-trg-${Environment}-result"
+      CodeUri: src/
+      Handler: handlers/result.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MainTable
+          AUDIO_BUCKET: !Ref AudioBucket
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MainTable
+        # ⚠️ Needed to SIGN the URL, not to fetch the object: a presigned URL
+        # carries the signer's permission, so without read access here the link
+        # this hands back would be signed for an action it cannot perform.
+        - S3ReadPolicy:
+            BucketName: !Ref AudioBucket
+      Events:
+        Result:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ask/{requestId}
+            Method: get
+
+  # Lambda for the /health endpoint (liveness check)
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lambda-trg-${Environment}-health"
+      CodeUri: src/
+      Handler: handlers/health.handler
+      Events:
+        Health:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /health
+            Method: get
+            # The one endpoint that opts out. A liveness check that needs a
+            # secret cannot be used to answer "is the API up, or is my key
+            # wrong?" - which is exactly what it is reached for. It touches no
+            # billable service and returns a constant, so leaving it open
+            # costs nothing.
+            Auth:
+              ApiKeyRequired: false
+
+Outputs:
+  ApiBaseUrl:
+    Description: "Base URL of the API (append /ask)"
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+
+  ApiKeyId:
+    Description: >
+      Id of the generated API key. ⚠️ This is the id, NOT the key itself - the
+      value is deliberately not an output, because stack outputs are readable
+      by anyone with describe-stacks and end up in CI logs. Read the secret
+      with the command in Backend/README.md.
+    Value: !Ref ApiKey

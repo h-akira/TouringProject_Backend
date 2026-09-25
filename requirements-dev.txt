@@ -1,0 +1,17 @@
+# Test-only dependencies for Backend/.
+#
+# ⚠️ These are NOT the Lambda's runtime dependencies. The handlers deliberately
+# import nothing outside the standard library and boto3, which the Lambda
+# runtime already provides, so there is no requirements.txt to install at
+# deploy time - only this, for running the tests.
+#
+# CI installs this before the test step (buildspec.yml). Without it the build
+# container has a clean Python and pytest is simply absent.
+pytest==9.0.1
+
+# ⚠️ Needed to RUN the tests, not to deploy. The Lambda runtime ships boto3, so
+# it is never packaged with the code - but that only helps in Lambda. Here the
+# handlers import it at module scope and tests/test_store.py imports
+# botocore.exceptions directly, so a bare interpreter cannot even collect the
+# suite. boto3 pulls botocore in.
+boto3==1.41.4

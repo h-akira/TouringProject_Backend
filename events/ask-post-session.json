@@ -1,0 +1,6 @@
+{
+  "body": "{\"question\": \"それはどのくらいの高さ？\", \"sessionId\": \"touring-0123456789abcdef0123456789abcdef\", \"start\": {\"latitude\": 35.0, \"longitude\": 139.0}}",
+  "httpMethod": "POST",
+  "path": "/ask",
+  "headers": { "Content-Type": "application/json" }
+}

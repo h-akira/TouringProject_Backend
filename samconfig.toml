@@ -1,0 +1,33 @@
+# SAM deploy configuration.
+# Lets `sam deploy` run non-interactively (no --guided prompts each time).
+# Naming convention: stack/resources use "<type>-trg-<env>-<identifier>".
+version = 0.1
+
+[default.global.parameters]
+stack_name = "stack-trg-dev-main"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name = "stack-trg-dev-main"
+region = "ap-northeast-1"
+# ⚠️ NAMED, not plain CAPABILITY_IAM: the template creates an IAM role with an
+# explicit RoleName (the one Transcribe assumes to write transcripts), and
+# CloudFormation refuses the whole change set without it.
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3 = true
+# AgentRuntimeArn is the NAME of an SSM parameter, not the ARN itself, so it is
+# safe to commit: the account id stays in Parameter Store. The Agent's deploy
+# writes that parameter (buildspec.yml), so `sam deploy` needs no arguments.
+#
+# ⚠️ It still stops to show the changeset - confirm_changeset above is kept on
+# purpose for hand-run deploys, where seeing what is about to change is worth
+# a keystroke. CI passes --no-confirm-changeset to override it.
+parameter_overrides = "Environment=\"dev\" AgentRuntimeArn=\"/trg/dev/agent-runtime-arn\""
+
+# NOTE: this stack stays in ap-northeast-1 (Tokyo), but the AgentCore runtime it
+# calls lives in us-east-1 (the web-search connector is only offered there), so
+# the Lambda targets that region explicitly. See docs/01_architecture.md 5.2.

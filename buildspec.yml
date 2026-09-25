@@ -1,0 +1,54 @@
+version: 0.2
+
+# Tests and deploys the SAM stack (Tokyo).
+#
+# ⚠️ The AgentCore runtime ARN comes from SSM (/trg/<env>/agent-runtime-arn),
+# written by the Agent's build (TouringProject_Agent, a separate CodeBuild
+# project). template.yaml takes it as AWS::SSM::Parameter::Value<String>, so a
+# missing parameter fails the deploy instead of wiring the Lambda to nothing.
+# The Agent's build also starts this build whenever the ARN changes.
+
+env:
+  variables:
+    BACKEND_REGION: "ap-northeast-1"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.13
+
+  pre_build:
+    commands:
+      # ⚠️ pytest is not present in the build image. It is only a test
+      # dependency, so it lives in requirements-dev.txt rather than being
+      # installed with the Lambda's code (the handlers import nothing beyond
+      # the standard library and boto3, which the runtime already provides).
+      - pip install -r requirements-dev.txt
+      # ⚠️ Tests run BEFORE anything is deployed. A red test should stop the
+      # release, not be discovered after it is already live.
+      - python3 -m pytest tests/ -q
+
+  build:
+    commands:
+      - sam build
+      # ⚠️ CAPABILITY_NAMED_IAM, not plain CAPABILITY_IAM: the template
+      # creates an IAM role with an explicit RoleName (the one Transcribe
+      # assumes to write transcripts), and CloudFormation refuses the whole
+      # change set without it. Nothing local catches this - it fails at
+      # deploy time only.
+      - >-
+        sam deploy
+        --stack-name stack-trg-${ENV}-main
+        --no-confirm-changeset
+        --no-fail-on-empty-changeset
+        --resolve-s3
+        --parameter-overrides Environment=${ENV} AgentRuntimeArn=/trg/${ENV}/agent-runtime-arn
+        --capabilities CAPABILITY_NAMED_IAM
+        --region ${BACKEND_REGION}
+
+  post_build:
+    commands:
+      # ⚠️ The API key's VALUE is never printed - it is the only thing standing
+      # between a Bedrock-billing endpoint and anyone who reads a build log.
+      # Retrieve it with the command in README.md.
+      - echo "Backend deploy complete."
