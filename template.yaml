@@ -29,7 +29,7 @@ Parameters:
       Lambdas, so no account id is ever committed or passed on a command line.
 
       ⚠️ The Agent must be deployed first: it is what writes this parameter
-      (Agent/buildspec.yml). A missing parameter fails the deploy with
+      (the buildspec.yml of TouringProject_Agent). A missing parameter fails the deploy with
       "Parameter /trg/... not found", which means exactly that.
 
       ⚠️ Cross-region ImportValue is not an option here. The AgentCore stack

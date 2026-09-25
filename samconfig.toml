@@ -21,7 +21,8 @@ confirm_changeset = true
 resolve_s3 = true
 # AgentRuntimeArn is the NAME of an SSM parameter, not the ARN itself, so it is
 # safe to commit: the account id stays in Parameter Store. The Agent's deploy
-# writes that parameter (buildspec.yml), so `sam deploy` needs no arguments.
+# writes that parameter (the buildspec.yml of TouringProject_Agent, not the one
+# in this repository), so `sam deploy` needs no arguments.
 #
 # ⚠️ It still stops to show the changeset - confirm_changeset above is kept on
 # purpose for hand-run deploys, where seeing what is about to change is worth
