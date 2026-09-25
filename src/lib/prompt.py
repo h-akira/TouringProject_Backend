@@ -12,6 +12,7 @@ handlers/transcribe_done.py builds it when the transcript arrives. Same
 question, same facts, one implementation.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from handlers.geocode import describe_location
@@ -30,9 +31,9 @@ def format_elapsed(elapsed_seconds: Any) -> Optional[str]:
     Every turn carries its own position, so the history ends up holding several
     of them. Without a sense of time the agent cannot tell whether "that
     mountain" refers to where the rider is now or where they were asked three
-    minutes and two kilometres ago. Elapsed time is used rather than a
-    timestamp: it is what the agent actually needs, and it keeps a log of the
-    rider's movements out of the prompt.
+    minutes and two kilometres ago. The current time is stated too (see
+    format_now), but this is still spelled out so the model does not have to
+    subtract one timestamp from another.
     """
     if not isinstance(elapsed_seconds, int) or isinstance(elapsed_seconds, bool):
         return None
@@ -45,6 +46,27 @@ def format_elapsed(elapsed_seconds: Any) -> Optional[str]:
 
     minutes = elapsed_seconds // 60
     return f"【この質問は、会話の最初の質問から約{minutes}分後のものです】"
+
+
+# Japan has no daylight saving, so a fixed offset is exact and needs no tzdata.
+JST = timezone(timedelta(hours=9), "JST")
+_WEEKDAYS = "月火水木金土日"
+
+
+def format_now(now: Optional[datetime] = None) -> str:
+    """State today's date and the time, in Japan time.
+
+    Without it the model assumes the date its training data suggests, and then
+    reads freshly searched articles as coming from the future. Weather, opening
+    hours and events all depend on it, and the Lambda's clock is the only one
+    that can be trusted - the model has none.
+    """
+    now = (now or datetime.now(JST)).astimezone(JST)
+    weekday = _WEEKDAYS[now.weekday()]
+    return (
+        f"【現在日時: {now.year}年{now.month}月{now.day}日（{weekday}）"
+        f"{now.hour}時{now.minute:02d}分（日本時間）】"
+    )
 
 
 def describe_heading(lat: float, lon: float, end: Optional[dict]) -> Optional[str]:
@@ -91,21 +113,24 @@ def build(
     start: Optional[dict],
     end: Optional[dict],
     elapsed_seconds: Any = None,
+    now: Optional[datetime] = None,
 ) -> str:
-    """Prepend the rider's location, which the agent's prompt expects.
+    """Prepend the current time and the rider's location, which the agent's prompt expects.
 
     The address is resolved here rather than left to the model, which places
     coordinates unreliably (see handlers/geocode.py). The raw coordinates go in
-    too, since they are what any later tool call would need.
+    too, since they are what any later tool call would need. The time goes in
+    even without a location: it does not depend on one.
     """
+    current_time = format_now(now)
     if not isinstance(start, dict):
-        return question
+        return f"{current_time}\n\n質問: {question}"
 
     lat, lon = start.get("latitude"), start.get("longitude")
     if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
-        return question
+        return f"{current_time}\n\n質問: {question}"
 
-    context = ""
+    context = f"{current_time}\n"
     elapsed = format_elapsed(elapsed_seconds)
     if elapsed:
         context += f"{elapsed}\n"
