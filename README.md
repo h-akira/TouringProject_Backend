@@ -151,10 +151,8 @@ AWS_PROFILE=touring sam local invoke AskFunction \
 
 ## AWS にデプロイする（実機から試すとき）
 
-> 📌 **通常は手で叩かなくてよい。** このリポジトリの `main` にpushすれば CodeBuild が
-> テスト → デプロイする（`buildspec.yml`。CodeBuild 自体は TouringProject_CICD）。
-> ⚠️ **Agent の Runtime ARN が変わったときは、Agent のビルドがこのビルドを起動する。**
-> 以下は**手元から直接デプロイしたいとき**の手順。
+> ⚠️ **Agent を先にデプロイしておく**（Runtime ARN を SSM から読むため）。
+> **Agent の Runtime ARN が変わったら、こちらも再デプロイする。**
 
 デプロイ設定は `samconfig.toml` に記述済み（スタック名・リージョン・パラメータ）。
 そのため**引数なしでデプロイできる**:
