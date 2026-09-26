@@ -1,0 +1,477 @@
+openapi: 3.0.3
+info:
+  title: Touring AI voice app - API
+  version: 0.1.0
+  description: >
+    App <-> backend contract for the touring AI voice app.
+    This is the source of truth for request/response shapes (used for the
+    frontend fetch types and as documentation). It is kept as a standalone
+    spec for now; it is NOT yet wired into API Gateway's DefinitionBody.
+    Wiring it in (for request validation) can come later once the shape is
+    stable. See 03_units_contracts.md UC-4.
+
+servers:
+  # The base URL is environment-specific and injected in the app via
+  # EXPO_PUBLIC_API_BASE_URL (see app/.env.example). Not hardcoded here.
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com/Prod
+    description: Deployed stage (values differ per environment)
+    variables:
+      apiId:
+        default: your-api-id
+      region:
+        default: ap-northeast-1
+
+# Every endpoint requires the API key unless it overrides this; /health does.
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Health check
+      description: >
+        Lightweight liveness/health check. No parameters.
+
+        ⚠️ The one endpoint that takes NO API key. A liveness check that needed
+        a secret could not answer "is the API up, or is my key wrong?", which
+        is what it gets reached for. It calls no billable service.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /ask:
+    post:
+      operationId: ask
+      summary: Submit a question about the current location
+      description: >
+        Send a question together with the current location. The answer is NOT
+        returned here: generating it takes 10-25s, which does not fit inside
+        API Gateway's 29s ceiling once speech is added, so the question is
+        queued and answered in the background.
+
+        The response is 202 with a `requestId`. Poll GET /ask/{requestId} until
+        its status is `done` or `error`.
+
+        Pass the same `sessionId` on later requests to continue the
+        conversation (US-1.02). To ask by voice, send the recording to
+        POST /ask-audio instead - the reply comes back the same way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AskRequest"
+      responses:
+        "202":
+          description: >
+            Question accepted and queued. Poll GET /ask/{requestId} for the
+            answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskAcceptedResponse"
+        "400":
+          description: >
+            Invalid request: malformed body, missing/empty `question`, a
+            question over the length limit, or a `sessionId` shorter than 33
+            characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: >
+            The API key is missing or wrong.
+
+            ⚠️ API Gateway also returns 403 - not 404 - for a path that is not
+            deployed, so this status does not prove the key is at fault. GET
+            /health needs no key, so a 200 there means the API itself is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            The usage plan's limit was hit: either the daily quota or the
+            per-second rate. The two are not distinguishable from the response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The question could not be accepted for processing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /ask-audio:
+    post:
+      operationId: askAudio
+      summary: Submit a recorded question about the current location
+      description: >
+        The voice counterpart of POST /ask: send the recording instead of
+        typing the question. The backend transcribes it and answers exactly as
+        it would a typed one, so the reply arrives the same way - 202 with a
+        `requestId`, then poll GET /ask/{requestId}.
+
+        Transcription happens here rather than in the app so that the audio
+        passes through a Lambda that can check it first: the payload size caps
+        how long a recording may be, which is the only place that limit can be
+        enforced (03_units_contracts.md UC-4). It also means the app needs no
+        AWS credentials - the API key is enough.
+
+        ⚠️ Expect this to take longer than POST /ask: transcription runs as a
+        batch job, and batch jobs queue when concurrency is capped.
+
+        The path is /ask-audio, not /ask/audio, because the latter sits inside
+        /ask/{requestId} - `audio` is a perfectly good requestId as far as that
+        route is concerned, and the two would only stay apart while they never
+        shared a method.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AskAudioRequest"
+            encoding:
+              audio:
+                contentType: audio/mp4
+              location:
+                contentType: application/json
+      responses:
+        "202":
+          description: >
+            Recording accepted and queued. Poll GET /ask/{requestId} for the
+            answer, same as POST /ask.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskAcceptedResponse"
+        "400":
+          description: >
+            Invalid request: missing or empty audio, an unsupported format, a
+            malformed `location` part, or a `sessionId` shorter than 33
+            characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The API key is missing or wrong (see POST /ask).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: >
+            The recording is too long. The limit is expressed in bytes, since
+            that is what the payload gives us - see `audio` for the ceiling.
+
+            ⚠️ API Gateway enforces its own 10MB limit before the handler runs,
+            so a large enough body fails without this shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: The usage plan's limit was hit (see POST /ask).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: >
+            The recording could not be accepted for processing - it could not
+            be stored, or transcription could not be started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /ask/{requestId}:
+    get:
+      operationId: getAskResult
+      summary: Collect the answer to a queued question
+      description: >
+        Poll this after POST /ask until `status` is `done` or `error`; while it
+        is `pending` the answer is still being generated.
+
+        The app backs its polling off (1s, then 2s, then 4s) and gives up after
+        120 seconds. Typed answers measure 10-13s and spoken ones 15-20s, the
+        difference being transcription; the cutoff is set against the spoken
+        case, plus room for a batch job that has to queue.
+
+        `pending` covers more than one internal state - a recording still being
+        transcribed reports as pending too, since the app has nothing different
+        to do about it.
+
+        Note that a failed question is reported as 200 with `status: "error"`,
+        not as an HTTP error: the request itself succeeded.
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          description: The id returned by POST /ask.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current state of the question.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskResultResponse"
+        "400":
+          description: No `requestId` was given.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The API key is missing or wrong (see POST /ask).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            No such request. Also returned once the record has expired, an
+            hour after it was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            The usage plan's limit was hit.
+
+            ⚠️ The app does NOT give up on this while polling - it polls once a
+            second, so a brief brush with the rate limit is expected and the
+            next attempt usually succeeds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The stored result could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      # ⚠️ API Gateway が読むヘッダ名は `x-api-key` 固定で、変更できない。
+      name: x-api-key
+      description: >
+        Per-device API key, issued when the stack is deployed and typed into
+        the app's settings screen (03_units_contracts.md UC-4). It is
+        stored with expo-secure-store, never in the bundle: EXPO_PUBLIC_ vars
+        are embedded in plain text, so they cannot hold a secret.
+
+        A usage plan caps requests per key, per day and per second. Note that
+        polling counts against it too - one question is a POST plus roughly ten
+        GETs.
+
+  schemas:
+    Coordinates:
+      type: object
+      description: A GPS point.
+      required: [latitude, longitude]
+      properties:
+        latitude:
+          type: number
+          format: double
+          example: 35.0
+        longitude:
+          type: number
+          format: double
+          example: 139.0
+
+    AskRequest:
+      type: object
+      description: >
+        Request body for POST /ask.
+
+        `start` is the rider's current location, and the point the address is
+        resolved from. `end` is an EARLIER position, used to derive the
+        direction of travel: the rider is travelling away from `end` towards
+        `start`. It stays optional - the server simply omits the heading when
+        it is missing, or when the two points are within a few metres of each
+        other (a rider stopped at a light, where the bearing would be GPS
+        noise).
+      required: [question, start]
+      properties:
+        question:
+          type: string
+          description: The rider's question, as text.
+          minLength: 1
+          maxLength: 500
+          example: 右手に見える山は何ですか？
+        sessionId:
+          type: string
+          description: >
+            Conversation id. Omit it to start a new conversation - the server
+            mints one and returns it. Send that value back to continue the
+            conversation. The app's job is to store it, not to generate it.
+            (At least 33 characters, an AgentCore requirement.)
+          minLength: 33
+          maxLength: 128
+          example: touring-0123456789abcdef0123456789abcdef
+        start:
+          allOf:
+            - $ref: "#/components/schemas/Coordinates"
+          description: The rider's current position.
+        end:
+          allOf:
+            - $ref: "#/components/schemas/Coordinates"
+          description: >
+            An earlier position, for the direction of travel (US-2.03). The app
+            picks it by walking back through its recent fixes for the newest
+            one far enough away to give a meaningful bearing, and omits it
+            entirely when there is none - while stopped, or just after a turn,
+            where a heading would be stale or change second to second.
+        elapsedSeconds:
+          type: integer
+          format: int32
+          minimum: 0
+          description: >
+            Seconds since the first question of this conversation. Lets the
+            agent tell how much the rider has moved between turns, so it can
+            resolve "that mountain" against the position it was asked at rather
+            than the current one. Omit on the first question of a conversation.
+          example: 180
+    AskAudioRequest:
+      type: object
+      description: >
+        Request body for POST /ask-audio, as multipart/form-data.
+
+        The question is the recording; everything else matches AskRequest and
+        carries the same meaning. It is multipart rather than JSON so the audio
+        travels as bytes - base64 in a JSON field would inflate it by a third
+        against a payload ceiling that doubles as the length limit.
+      required: [audio, location]
+      properties:
+        audio:
+          type: string
+          format: binary
+          description: >
+            The recording, as M4A (MPEG-4 / AAC).
+
+            ⚠️ Transcribe recommends FLAC or WAV, but Android's recorder emits
+            neither; M4A is where what the device can produce and what batch
+            Transcribe accepts overlap, so nothing has to transcode
+            (03_units_contracts.md UC-4).
+
+            The size limit is what bounds recording length - a question runs a
+            few seconds to a dozen, tens of KB at this encoding, so the cap sits
+            far above normal use and only catches a client asking for trouble.
+        location:
+          type: string
+          description: >
+            A JSON object with `start`, and optionally `end` and
+            `elapsedSeconds` - the same fields AskRequest defines, with the same
+            meaning. Sent as a JSON string because multipart parts are text.
+          example: '{"start":{"latitude":35.0,"longitude":139.0}}'
+        sessionId:
+          type: string
+          description: >
+            Conversation id, exactly as in AskRequest: omit it to start a new
+            conversation and store the one that comes back.
+          minLength: 33
+          maxLength: 128
+          example: touring-0123456789abcdef0123456789abcdef
+
+    AskAcceptedResponse:
+      type: object
+      description: >
+        Response body for POST /ask. The question has been queued, not
+        answered - fetch the answer from GET /ask/{requestId}.
+      required: [requestId, sessionId]
+      properties:
+        requestId:
+          type: string
+          description: Id to poll GET /ask/{requestId} with.
+          example: 3f1c9a2e-5b7d-4e6a-9c81-0d2f4b6a8e13
+        sessionId:
+          type: string
+          description: >
+            The conversation id this question belongs to. Echoed back so the
+            app can store it and continue the conversation on the next request
+            (it is the server that generates one when the app sends none).
+          example: touring-0123456789abcdef0123456789abcdef
+
+    AskResultResponse:
+      type: object
+      description: Response body for GET /ask/{requestId}.
+      required: [status, sessionId]
+      properties:
+        status:
+          type: string
+          enum: [pending, done, error]
+          description: >
+            `pending` means keep polling. `done` means `answer` is present;
+            `error` means `error` is, and the question will not be answered.
+          example: done
+        answer:
+          type: string
+          description: The answer to read back to the rider. Present when done.
+          example: それはたぶん富士山です。標高は3776メートルあります。
+        error:
+          type: string
+          description: >
+            Why the question could not be answered. Present when the status is
+            `error`. Safe to show to the rider.
+          example: The agent could not be reached.
+        audioUrl:
+          type: string
+          format: uri
+          description: >
+            Presigned S3 URL for the spoken answer (Polly). Present when done,
+            alongside `answer`.
+
+            A link rather than the audio itself, so the text arrives without
+            waiting on it and the app can show the answer while the audio
+            downloads. ⚠️ It also keeps this response small, which matters
+            because the rider loses signal and the app retries - re-sending the
+            audio on every attempt is what that would cost.
+
+            ⚠️ Fetch it directly, with no API key: it is S3, not this API, and
+            the signature is the authorisation. The link expires within minutes,
+            and the object itself is deleted after a few days, so treat it as
+            good for this playback only - do not store it.
+
+            Absent if speech synthesis failed. The answer still stands; read it
+            from `answer` instead.
+          example: https://bucket.s3.ap-northeast-1.amazonaws.com/answers/abc.mp3?X-Amz-Signature=...
+        sessionId:
+          type: string
+          description: The conversation id this question belongs to.
+          example: touring-0123456789abcdef0123456789abcdef
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: Health status.
+          example: ok

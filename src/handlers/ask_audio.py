@@ -5,11 +5,11 @@ is the only place a recording can be checked before it costs anything - but it
 cannot finish the job: batch transcription returns before there is a
 transcript, so the question is not queued here. Amazon Transcribe reports
 completion through EventBridge, and handlers/transcribe_done.py picks it up,
-builds the prompt and queues it (docs/01_architecture.md section 7).
+builds the prompt and queues it (docs/01_architecture.md section 3).
 
 ⚠️ Transcribe is called in batch, not streaming, because streaming is
 bidirectional and cannot sit behind Lambda. Doing so would mean handing the app
-AWS credentials and losing every check below (adr/002).
+AWS credentials and losing every check below (docs/01_architecture.md section 3).
 
 The response is 202 with the same requestId shape POST /ask returns, so the app
 polls GET /ask/{requestId} either way.
@@ -27,7 +27,7 @@ import boto3
 
 from lib import store
 
-# What the app records (docs/01_architecture.md section 7). Transcribe prefers
+# What the app records (docs-parent/03_units_contracts.md UC-4). Transcribe prefers
 # FLAC or WAV, but Android's recorder emits neither.
 AUDIO_FORMAT = "m4a"
 AUDIO_CONTENT_TYPES = ("audio/mp4", "audio/m4a", "audio/x-m4a")

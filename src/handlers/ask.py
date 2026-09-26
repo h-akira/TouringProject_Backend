@@ -1,6 +1,6 @@
 """Handler for POST /ask: accepts a question and queues it for the agent.
 
-The Lambda is a gatekeeper, not the brains (pre-research/agentcore/AUTH.md):
+The Lambda is a gatekeeper, not the brains (docs/01_architecture.md section 1):
 it validates the request, settles the facts the model should not guess at (the
 address, the heading), and hands the result to the queue. The agent is called
 by handlers/worker.py, and the app collects the answer from
@@ -8,8 +8,7 @@ handlers/result.py.
 
 ⚠️ This endpoint used to wait for the answer and return it. It no longer does:
 API Gateway caps a request at 29s and the agent alone measured 25.5s, so the
-wait was moved off the request path entirely (docs/01_architecture.md section
-5). The response is now 202 with a requestId to poll.
+wait was moved off the request path entirely (docs/02_async_ask.md). The response is now 202 with a requestId to poll.
 """
 
 import json
@@ -24,7 +23,7 @@ from lib import prompt as prompt_builder
 from lib import store
 
 # Answers are read aloud while riding, so a question that long is a mistake
-# (and caps input cost - docs/01_architecture.md section 9).
+# (and caps input cost - docs/01_architecture.md section 4).
 MAX_QUESTION_CHARS = 500
 
 # AgentCore rejects a runtimeSessionId below this length.
@@ -105,7 +104,7 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         return _response(502, {"error": "The question could not be accepted."})
 
     # Neither coordinates nor the resolved address are logged: where the rider
-    # has been is theirs (docs/03_dynamodb_table.md section 4).
+    # has been is theirs (docs/04_dynamodb_table.md section 4).
     print(f"timing: geocode={geocode_ms:.0f}ms queued={request_id}")
 
     # 202: accepted, not answered. The app polls GET /ask/{requestId}.

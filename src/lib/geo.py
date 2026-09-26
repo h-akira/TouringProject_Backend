@@ -1,7 +1,7 @@
 """Geo helpers: bearing between two GPS points, and its human-readable form.
 
 The app sends two GPS points taken around the recording (see
-docs/01_architecture.md). The direction of travel is derived here, on the
+docs/03_heading.md). The direction of travel is derived here, on the
 backend, rather than left to the LLM: bearing is plain trigonometry, and asking
 the model to infer "which side is on the right" from raw coordinates is both
 wasteful and unreliable.
@@ -40,7 +40,7 @@ _COMPASS_POINTS: tuple[str, ...] = (
 
 # Below this distance the two points are treated as the same place: GPS noise
 # would dominate and produce a meaningless bearing (e.g. while stopped at a
-# traffic light). See docs/01b_heading.md section 3.
+# traffic light). See docs/03_heading.md section 2.
 MIN_DISTANCE_METERS = 5.0
 
 _EARTH_RADIUS_METERS = 6_371_000.0

@@ -2,13 +2,13 @@
 
 This is where the waiting happens. Invoked from the queue rather than API
 Gateway, so the agent's 10-25s is no longer racing the 29s request ceiling
-(docs/01a_async_ask.md).
+(docs/02_async_ask.md).
 
 ⚠️ SQS delivers at least once, so this handler must tolerate being run twice
 for the same question - AWS is explicit about that requirement. Here a repeat
 would call the agent, and be billed, a second time, so the first thing it does
 is claim the record; a duplicate loses the claim and returns without calling
-anything. See docs/03_dynamodb_table.md section 4.
+anything. See docs/04_dynamodb_table.md section 4.
 """
 
 import json

@@ -1,7 +1,7 @@
 """Tests for the DynamoDB access layer.
 
 Mostly about two things the design depends on: the key layout that lets one
-table hold every entity type (docs/03_dynamodb_table.md), and the conditional
+table hold every entity type (docs/04_dynamodb_table.md), and the conditional
 write that makes duplicate SQS deliveries harmless.
 """
 

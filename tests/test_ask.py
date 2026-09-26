@@ -1,7 +1,7 @@
 """Tests for the POST /ask handler.
 
 The handler no longer waits for an answer - it validates the request, settles
-the address and heading into a prompt, and queues it (docs/01a). So
+the address and heading into a prompt, and queues it (docs/02_async_ask.md). So
 these cover that job: validation, session handling, and what ends up in the
 stored prompt. The agent itself is exercised in test_worker.py.
 

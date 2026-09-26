@@ -6,7 +6,7 @@ Description: >
   and web search; POST /ask-audio does the same for a recording, transcribing
   it first and speaking the answer back; GET /health is a liveness check.
   Access is controlled by an API key with a usage plan (see
-  docs/01_architecture.md sections 7-9).
+  docs/01_architecture.md sections 3-4).
 
 # Naming convention: <resource-type>-trg-<env>-<identifier>
 #   trg = touring, env = dev/prod, identifier = "main" for a single/primary
@@ -42,7 +42,7 @@ Parameters:
     Default: us-east-1
     Description: >
       Region of the AgentCore runtime. Not this stack's region: the runtime is
-      pinned to us-east-1 by the web-search connector (docs/01 section 6).
+      pinned to us-east-1 by the web-search connector (docs-parent/03_units_contracts.md UC-2).
 
   DailyQuota:
     Type: Number
@@ -50,7 +50,7 @@ Parameters:
     Description: >
       Requests allowed per API key per day. ⚠️ This counts every call, not
       every question: one question is a POST plus roughly ten GET polls while
-      the answer is generated (docs/01a). 2000/day is therefore on the order of
+      the answer is generated (docs-parent/03_units_contracts.md UC-4). 2000/day is therefore on the order of
       180 questions a day - far more than a rider asks, but low enough that a
       leaked key cannot run up an unbounded Bedrock bill.
 
@@ -78,7 +78,7 @@ Parameters:
       consumed within a minute - the recording by Transcribe, the answer by one
       playback - so this is slack for a retry, not retention. Kept short
       because a recording is the rider's voice and an answer names where they
-      were (docs/01_architecture.md section 7). One day is the minimum a
+      were (docs/01_architecture.md section 3). One day is the minimum a
       lifecycle rule can express.
 
 Globals:
@@ -239,7 +239,7 @@ Resources:
                 Action: s3:PutObject
                 Resource: !Sub "${AudioBucket.Arn}/transcripts/*"
 
-  # Single table for the whole app - see docs/03_dynamodb_table.md for why one
+  # Single table for the whole app - see docs/04_dynamodb_table.md for why one
   # table holds every entity type, and how pk/sk distinguish them.
   #
   # AWS::DynamoDB::Table rather than SAM's SimpleTable: the latter takes only a
@@ -263,7 +263,7 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
       # Answers can name places the rider has been, so they are not kept around
-      # (docs/03_dynamodb_table.md section 4).
+      # (docs/04_dynamodb_table.md section 4).
       TimeToLiveSpecification:
         AttributeName: expiresAt
         Enabled: true
@@ -276,7 +276,7 @@ Resources:
       QueueName: !Sub "sqs-trg-${Environment}-ask"
       # ⚠️ Must exceed the worker's own Timeout (120s), or SQS redelivers a
       # message that is still being processed - which would call the agent
-      # twice and bill twice. See docs/03_dynamodb_table.md section 4.
+      # twice and bill twice. See docs/04_dynamodb_table.md section 4.
       VisibilityTimeout: 180
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt AskDeadLetterQueue.Arn

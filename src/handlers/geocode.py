@@ -4,7 +4,7 @@ Exists because the model gets this wrong on its own: asked to place a
 coordinate, the deployed agent named a city about 40km away, and every answer
 built on that was wrong with it. Coordinates are not something an LLM can
 reliably invert, so the address is resolved here and handed over as fact
-(pre-research/geocoding/).
+(docs/01_architecture.md section 2).
 
 Uses Amazon Location Service, which is callable from this Lambda's own region,
 so no extra cross-region hop is added.

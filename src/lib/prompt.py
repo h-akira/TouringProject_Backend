@@ -1,9 +1,9 @@
 """Turns a question and the rider's position into the prompt for the agent.
 
 This is the "settle the facts before the model sees them" step
-(docs/01_architecture.md section 4): the address is resolved and the heading is
+(docs/01_architecture.md section 2): the address is resolved and the heading is
 computed here, so the model is told where the rider is rather than asked to
-work it out from coordinates - which it does badly (learning/61 section 2).
+work it out from coordinates - which it does badly (docs/01_architecture.md section 2).
 
 Both request paths need it. A typed question goes through handlers/ask.py,
 which builds the prompt while the app is still on the request; a recorded one
@@ -74,7 +74,7 @@ def describe_heading(lat: float, lon: float, end: Optional[dict]) -> Optional[st
 
     The bearing is computed here rather than described to the model as two
     coordinate pairs: it is plain trigonometry, and the model places coordinates
-    unreliably (learning/61 section 2).
+    unreliably (docs/01_architecture.md section 2).
 
     Note the direction the two points are read in. `start` is the rider's
     current position (it is what the address is resolved from), so `end` is the

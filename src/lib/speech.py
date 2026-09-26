@@ -3,7 +3,7 @@
 Synthesis happens as soon as the answer exists (handlers/worker.py) rather than
 when the app asks for it. Generating on demand would put Polly's latency in
 front of the first playback, which is the moment the rider is waiting on
-(docs/01_architecture.md section 7).
+(docs/01_architecture.md section 3).
 
 The audio lands in the same bucket the recording went to, so one lifecycle rule
 covers both. handlers/result.py hands back a presigned URL to it.

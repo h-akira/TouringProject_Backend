@@ -8,7 +8,7 @@ queue. From there handlers/worker.py cannot tell the two paths apart.
 
 EventBridge is used rather than polling the job: the answer arrives when it
 arrives, and nothing has to sit waiting for it (docs/01_architecture.md
-section 7).
+section 3).
 
 ⚠️ The job name IS the requestId (ask_audio.py sets it), which is what ties the
 event back to the record.

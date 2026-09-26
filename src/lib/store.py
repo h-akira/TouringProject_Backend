@@ -1,7 +1,7 @@
 """DynamoDB access for the async /ask flow.
 
 One table holds every entity type, keyed by pk/sk - see
-docs/03_dynamodb_table.md. This module owns the "ASK#" records: the status of a
+docs/04_dynamodb_table.md. This module owns the "ASK#" records: the status of a
 question between the app posting it and collecting the answer.
 
 Records expire after an hour (same doc, section 4). Coordinates do not appear

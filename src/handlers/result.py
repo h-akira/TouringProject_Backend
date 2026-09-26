@@ -4,7 +4,7 @@ This is what the app polls while it waits. It only reads the table - it never
 calls the agent, so it stays fast however long the answer takes.
 
 `pending` and `processing` are both reported as "pending": the distinction
-exists to make duplicate deliveries safe (docs/03_dynamodb_table.md section 4)
+exists to make duplicate deliveries safe (docs/04_dynamodb_table.md section 4)
 and means nothing to the app, which either has an answer or does not.
 
 The exception is a `processing` record whose worker died without recording
@@ -89,7 +89,7 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             "sessionId": session_id,
         }
         # Absent when synthesis failed; the answer still stands and the app
-        # reads it from `answer` (docs/02_api_openapi.yaml).
+        # reads it from `answer` (docs-parent/04_api_openapi.yaml).
         audio_url = _audio_url(item.get("audioKey"))
         if audio_url:
             body["audioUrl"] = audio_url
@@ -139,7 +139,7 @@ def _audio_url(audio_key: Any) -> Optional[str]:
     The link is what the app fetches instead of receiving the bytes inline: the
     text arrives without waiting on the download, and the polled response stays
     small enough to re-send when the rider loses signal
-    (docs/01_architecture.md section 7).
+    (docs/01_architecture.md section 3).
 
     Minutes, not hours: the app plays the answer as soon as it has it, so the
     link only has to outlive one playback. Returns None on failure - losing the
