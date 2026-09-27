@@ -354,6 +354,7 @@ def test_malformed_second_point_is_ignored(ask):
         {"question": "   "},                   # blank question
         {"question": "x" * 501},               # too long
         {"question": "q", "sessionId": "short"},  # session id under 33 chars
+        {"question": "q", "sessionId": "s" * 129},  # session id over 128 chars
     ],
 )
 def test_invalid_requests_are_rejected(ask, body):

@@ -233,6 +233,12 @@ def test_oversized_recording_never_reaches_s3(ask_audio):
                 location='{"start":{"latitude":35,"longitude":139}}', session_id="short"
             )
         ),
+        # Session id longer than the API contract allows.
+        _event(
+            _multipart(
+                location='{"start":{"latitude":35,"longitude":139}}', session_id="s" * 129
+            )
+        ),
     ],
 )
 def test_invalid_requests_are_rejected(ask_audio, event):

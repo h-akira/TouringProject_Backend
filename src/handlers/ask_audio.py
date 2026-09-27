@@ -41,6 +41,9 @@ MAX_AUDIO_BYTES = 2 * 1024 * 1024
 
 # AgentCore rejects a runtimeSessionId below this length.
 MIN_SESSION_ID_CHARS = 33
+# Upper bound from the API contract (docs-parent/04_api_openapi.yaml maxLength),
+# so an oversized id is refused here rather than stored and sent to the agent.
+MAX_SESSION_ID_CHARS = 128
 
 QUEUE_URL = os.environ.get("QUEUE_URL", "")
 AUDIO_BUCKET = os.environ.get("AUDIO_BUCKET", "")
@@ -201,10 +204,16 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     session_id = parts.get("sessionId")
     if session_id is None:
         session_id = _new_session_id()
-    elif not isinstance(session_id, str) or len(session_id) < MIN_SESSION_ID_CHARS:
+    elif (
+        not isinstance(session_id, str)
+        or not MIN_SESSION_ID_CHARS <= len(session_id) <= MAX_SESSION_ID_CHARS
+    ):
         return _response(
             400,
-            {"error": f"`sessionId` must be at least {MIN_SESSION_ID_CHARS} characters."},
+            {
+                "error": f"`sessionId` must be {MIN_SESSION_ID_CHARS} to "
+                f"{MAX_SESSION_ID_CHARS} characters."
+            },
         )
 
     # The request id doubles as the transcription job name, so the completion
