@@ -59,8 +59,8 @@ Parameters:
     Default: "5"
     Description: >
       Steady-state requests per second per API key. ⚠️ Must stay above the
-      app's polling rate: it polls once a second while waiting (App/src/app/
-      index.tsx POLL_STEPS), so a rate of 1 would throttle the rider's own
+      app's polling rate: it polls once a second while waiting (docs-parent/
+      03_units_contracts.md UC-4), so a rate of 1 would throttle the rider's own
       question.
 
   ThrottleBurst:

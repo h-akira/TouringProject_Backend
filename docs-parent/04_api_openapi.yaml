@@ -274,8 +274,9 @@ components:
       # ⚠️ API Gateway が読むヘッダ名は `x-api-key` 固定で、変更できない。
       name: x-api-key
       description: >
-        Per-device API key, issued when the stack is deployed and typed into
-        the app's settings screen (03_units_contracts.md UC-4). It is
+        API key issued when the stack is deployed and typed into the app's
+        settings screen (03_units_contracts.md UC-4). Every user enters the
+        same key - there are no per-user accounts. It is
         stored with expo-secure-store, never in the bundle: EXPO_PUBLIC_ vars
         are embedded in plain text, so they cannot hold a secret.
 

@@ -3,7 +3,7 @@
 Without it the model assumed the date its training data suggested and read
 freshly searched articles as coming from the future (seen on a ride test).
 
-Coordinates here are public landmarks, never real test locations (CLAUDE.md).
+Coordinates here are public landmarks, never real test locations (the parent AGENTS.md, public-repository rules).
 """
 
 import sys

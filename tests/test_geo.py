@@ -4,7 +4,7 @@ Pure trigonometry, so nothing is stubbed. The cases that matter are the ones
 that decide what the rider hears: which way is "right", and the stationary case
 where a bearing would be nothing but GPS noise.
 
-Coordinates here are public landmarks, never real test locations (CLAUDE.md).
+Coordinates here are public landmarks, never real test locations (the parent AGENTS.md, public-repository rules).
 """
 
 import sys

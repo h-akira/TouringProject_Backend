@@ -49,7 +49,8 @@ flowchart LR
 
 ### CICD
 
-- Agent と Backend のデプロイ、App の Play 内部テストへの配信を担う。Agent・Backend のデプロイの仕組みは公開側に書かない。
+- Agent と Backend のデプロイを担う。Agent・Backend のデプロイの仕組みは公開側に書かない。
+- App の Play 内部テストへの配信は App の GitHub Actions が行い、CICD はその設定手順（Google Cloud・Play Console・GitHub）を持つ。
 
 ## 4. 技術選定
 
@@ -62,7 +63,7 @@ flowchart LR
 | Agent | Bedrock AgentCore（Strands）・CDK（`agentcore` CLI が生成） | セッション管理がネイティブで、Web 検索のコネクタがある |
 | モデル | Claude Sonnet 4.6（`us.anthropic.claude-sonnet-4-6`） | 回答の質。リージョンに合わせた推論プロファイルを使う |
 | STT / TTS | Amazon Transcribe（バッチ）/ Amazon Polly（`Kazuha`） | Lambda から呼べる。日本語の音声→音声モデルは無い |
-| CI/CD | AWS CodeBuild（Agent・Backend）・GitHub Actions（App） | App を AWS に依存させない |
+| CI/CD | AWS CodeBuild（Agent・Backend）・GitHub Actions（App の Play 配信） | App を AWS に依存させない |
 
 ## 5. リージョン
 
