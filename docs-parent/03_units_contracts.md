@@ -64,7 +64,7 @@
 ### 非同期の受け取り
 
 - `POST /ask`（テキスト）と `POST /ask-audio`（音声）は 202 と `requestId`・`sessionId` を返す。回答は返さない。
-- 回答は `GET /ask/{requestId}` をポーリングして取る。`status` は `pending` / `done` / `error` の3つ。`done` なら回答のテキストと音声の署名付き URL が載る。
+- 回答は `GET /ask/{requestId}` をポーリングして取る。`status` は `pending` / `done` / `error` の3つ。`done` なら回答のテキストと音声の署名付き URL が載る。音声の質問は、文字起こしが終わると状態によらず `transcript`（聞き取った文。何も聞き取れなければ空文字）も載る。
 
 ⚠️ ポーリングは必ず止まるように作る。間隔は経過時間で延ばす。
 
@@ -131,7 +131,7 @@ Backend が組み、Agent はそのまま LLM に渡す。
 
 ### 応答
 
-- Strands のイベントの SSE（`data: {...}` の行）で返る。Backend は `event.contentBlockDelta.delta.text` を順に連結して回答にする。
+- Strands のイベントの SSE（`data: {...}` の行）で返る。Backend は `event.contentBlockDelta.delta.text` を順に連結して回答にする。ただし最後のツール呼び出し（`event.contentBlockStart.start.toolUse`）より前のテキストは捨てる（検索の前置きを読み上げないため）。
 - Agent がペイロードを受け付けないときは `{"error": "..."}` を返す。Backend はこれを失敗として扱う。
 
 ### 会話の継続

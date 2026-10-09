@@ -434,6 +434,18 @@ components:
             Why the question could not be answered. Present when the status is
             `error`. Safe to show to the rider.
           example: The agent could not be reached.
+        transcript:
+          type: string
+          description: >
+            What the recording was heard as, for questions sent to
+            POST /ask-audio. Present once transcription has finished, whatever
+            the status - including `error`, where an empty string means nothing
+            could be heard. Absent for typed questions and while still
+            transcribing.
+
+            For the rider to check afterwards whether a bad answer came from a
+            bad recording or a misheard one; not read aloud.
+          example: この山は何ですか
         audioUrl:
           type: string
           format: uri
