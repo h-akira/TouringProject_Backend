@@ -33,14 +33,20 @@ def _stub(geocode, result=None, error=None, capture=None):
     geocode._client = _Client()
 
 
-def _item(region=None, locality=None, sub_region=None, label=None):
+def _item(region=None, locality=None, sub_region=None, label=None,
+          district=None, sub_district=None):
     address = {}
     if region is not None:
         address["Region"] = {"Name": region}
     if locality is not None:
         address["Locality"] = locality
     if sub_region is not None:
-        address["SubRegion"] = sub_region
+        # The API returns SubRegion as a structure, like Region.
+        address["SubRegion"] = {"Name": sub_region}
+    if district is not None:
+        address["District"] = district
+    if sub_district is not None:
+        address["SubDistrict"] = sub_district
     if label is not None:
         address["Label"] = label
     return {"ResultItems": [{"Address": address}]}
@@ -49,6 +55,37 @@ def _item(region=None, locality=None, sub_region=None, label=None):
 def test_prefecture_and_city_are_joined(geocode):
     _stub(geocode, _item(region="神奈川県", locality="箱根町"))
     assert geocode.describe_location(35.2323, 139.0230) == "神奈川県箱根町"
+
+
+def test_district_is_appended_to_the_city(geocode):
+    _stub(geocode, _item(region="神奈川県", locality="箱根町", sub_district="湯本"))
+    assert geocode.describe_location(35.2329, 139.1056) == "神奈川県箱根町湯本"
+
+
+def test_ward_of_a_designated_city_is_included(geocode):
+    _stub(geocode, _item(region="北海道", locality="札幌市", district="北区",
+                         sub_district="北6条西"))
+    assert geocode.describe_location(43.0687, 141.3508) == "北海道札幌市北区北6条西"
+
+
+def test_district_already_in_the_name_is_not_repeated(geocode):
+    _stub(geocode, _item(region="東京都", locality="千代田区", district="千代田区",
+                         sub_district="丸の内"))
+    assert geocode.describe_location(35.6812, 139.7671) == "東京都千代田区丸の内"
+
+
+def test_district_without_a_city_is_dropped(geocode):
+    # A town name with no city around it would be ambiguous.
+    _stub(geocode, _item(region="静岡県", sub_district="どこかの町"))
+    assert geocode.describe_location(34.7, 138.9) == "静岡県"
+
+
+def test_japanese_names_are_requested(geocode):
+    capture: dict = {}
+    _stub(geocode, _item(region="東京都", locality="千代田区"), capture=capture)
+    geocode.describe_location(35.6812, 139.7671)
+
+    assert capture["Language"] == "ja"
 
 
 def test_longitude_is_sent_first(geocode):
