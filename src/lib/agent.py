@@ -29,8 +29,21 @@ AGENT_ARN = os.environ.get("AGENT_ARN", "")
 _client = boto3.client("bedrock-agentcore", region_name=AGENT_REGION)
 
 
+def _is_tool_use_start(event: dict) -> bool:
+    """True when the model starts calling a tool (e.g. web search)."""
+    start = event.get("event", {}).get("contentBlockStart", {}).get("start", {})
+    return isinstance(start, dict) and "toolUse" in start
+
+
 def _extract_answer(stream: Any) -> str:
-    """Reassemble the answer from the runtime's SSE event stream."""
+    """Reassemble the answer from the runtime's SSE event stream.
+
+    Only the text after the last tool call is the answer. Before searching, the
+    model tends to say something like "I can't be sure of that, let me look it
+    up" - read aloud, that tells the rider it does not know and then answers
+    anyway, and makes a rider who cannot look away from the road listen to
+    twice as much.
+    """
     answer = ""
     for raw in stream.iter_lines():
         if not raw:
@@ -45,6 +58,9 @@ def _extract_answer(stream: Any) -> str:
         # The agent yields its own {"error": ...} for a rejected payload.
         if isinstance(event, dict) and "error" in event and "event" not in event:
             raise RuntimeError(str(event["error"]))
+        if _is_tool_use_start(event):
+            answer = ""
+            continue
         delta = (
             event.get("event", {})
             .get("contentBlockDelta", {})
