@@ -4,9 +4,9 @@ One table holds every entity type, keyed by pk/sk - see
 docs/04_dynamodb_table.md. This module owns the "ASK#" records: the status of a
 question between the app posting it and collecting the answer.
 
-Records expire after an hour (same doc, section 4). Coordinates do not appear
-in them today, but only because the prompt is built before anything is stored -
-it is not a rule this module enforces.
+Records expire after an hour (same doc, section 4). Coordinates appear in the
+prompt and in `agentLocation` until the question is answered, and in
+`location` while a recording is being transcribed.
 """
 
 import os
@@ -41,24 +41,31 @@ def _key(request_id: str) -> dict[str, str]:
     return {"pk": f"ASK#{request_id}", "sk": "STATUS"}
 
 
-def create_pending(request_id: str, session_id: str, prompt: str) -> None:
+def create_pending(
+    request_id: str,
+    session_id: str,
+    prompt: str,
+    agent_location: Optional[dict[str, Any]] = None,
+) -> None:
     """Record a question as accepted, before anything has been generated.
 
     The prompt is stored because the worker runs in a separate invocation and
-    needs it; it already has the address folded in, so the coordinates
-    themselves never have to be written.
+    needs it. `agent_location` (lib/prompt.py) rides along for the same reason:
+    the agent's place tools read it. Both are removed once the question is
+    answered or fails (save_answer, save_error).
     """
     now = int(time.time())
-    _table().put_item(
-        Item={
-            **_key(request_id),
-            "status": "pending",
-            "sessionId": session_id,
-            "prompt": prompt,
-            "createdAt": now,
-            "expiresAt": now + TTL_SECONDS,
-        }
-    )
+    item: dict[str, Any] = {
+        **_key(request_id),
+        "status": "pending",
+        "sessionId": session_id,
+        "prompt": prompt,
+        "createdAt": now,
+        "expiresAt": now + TTL_SECONDS,
+    }
+    if agent_location:
+        item["agentLocation"] = _to_dynamo_numbers(agent_location)
+    _table().put_item(Item=item)
 
 
 def _to_dynamo_numbers(value: Any) -> Any:
@@ -129,7 +136,12 @@ def create_pending_audio(
     )
 
 
-def start_pending(request_id: str, prompt: str, transcript: str) -> None:
+def start_pending(
+    request_id: str,
+    prompt: str,
+    transcript: str,
+    agent_location: Optional[dict[str, Any]] = None,
+) -> None:
     """Move a transcribed question into the queue-able state.
 
     Mirrors what create_pending writes for a typed question: once the prompt
@@ -141,17 +153,21 @@ def start_pending(request_id: str, prompt: str, transcript: str) -> None:
     answered: it is returned to the app so the rider can see what the recording
     was heard as (docs-parent/04_api_openapi.yaml).
     """
+    expression = "SET #s = :pending, prompt = :prompt, transcript = :transcript"
+    values: dict[str, Any] = {
+        ":pending": "pending",
+        ":prompt": prompt,
+        ":transcript": transcript,
+    }
+    if agent_location:
+        expression += ", agentLocation = :agentLocation"
+        values[":agentLocation"] = _to_dynamo_numbers(agent_location)
+
     _table().update_item(
         Key=_key(request_id),
-        UpdateExpression=(
-            "SET #s = :pending, prompt = :prompt, transcript = :transcript REMOVE #loc"
-        ),
+        UpdateExpression=f"{expression} REMOVE #loc",
         ExpressionAttributeNames={"#s": "status", "#loc": "location"},
-        ExpressionAttributeValues={
-            ":pending": "pending",
-            ":prompt": prompt,
-            ":transcript": transcript,
-        },
+        ExpressionAttributeValues=values,
     )
 
 
@@ -214,7 +230,7 @@ def save_answer(
 
     _table().update_item(
         Key=_key(request_id),
-        UpdateExpression=f"{expression} REMOVE prompt",
+        UpdateExpression=f"{expression} REMOVE prompt, agentLocation",
         ExpressionAttributeNames=names,
         ExpressionAttributeValues=values,
     )
@@ -237,7 +253,7 @@ def save_error(
 
     _table().update_item(
         Key=_key(request_id),
-        UpdateExpression=f"{expression} REMOVE prompt",
+        UpdateExpression=f"{expression} REMOVE prompt, agentLocation",
         ExpressionAttributeNames={"#s": "status", "#e": "error"},
         ExpressionAttributeValues=values,
     )

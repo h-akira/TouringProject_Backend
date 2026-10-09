@@ -46,6 +46,12 @@ class _FakeStore:
     def save_error(self, _request_id, message):
         self.saved_error = message
 
+    @staticmethod
+    def from_dynamo_numbers(value):
+        from lib.store import from_dynamo_numbers
+
+        return from_dynamo_numbers(value)
+
 
 @pytest.fixture
 def worker():
@@ -73,8 +79,8 @@ def _event(*request_ids: str) -> dict:
 def _run(worker, store, answer="それは富士山です", error=None):
     calls = []
 
-    def fake_ask(prompt, session_id):
-        calls.append((prompt, session_id))
+    def fake_ask(prompt, session_id, location=None):
+        calls.append((prompt, session_id, location))
         if error is not None:
             raise error
         return answer
@@ -95,6 +101,39 @@ def test_answer_is_stored(worker):
     # The prompt built by /ask is what reaches the agent, unchanged.
     assert calls[0][0] == store.record["prompt"]
     assert calls[0][1] == store.record["sessionId"]
+
+
+def test_location_reaches_the_agent_as_numbers(worker):
+    # DynamoDB hands back Decimal, which json.dumps cannot send.
+    from decimal import Decimal
+
+    store = _FakeStore(
+        record={
+            "prompt": "質問: 右手の公園は？",
+            "sessionId": "touring-" + "a" * 32,
+            "agentLocation": {
+                "latitude": Decimal("35.6812"),
+                "longitude": Decimal("139.7671"),
+                "headingDegrees": Decimal("90.5"),
+            },
+        }
+    )
+    calls = _run(worker, store)
+
+    worker.handler(_event("req-1"), None)
+
+    location = calls[0][2]
+    assert location == {"latitude": 35.6812, "longitude": 139.7671, "headingDegrees": 90.5}
+    json.dumps(location)
+
+
+def test_no_location_is_sent_when_none_was_stored(worker):
+    store = _FakeStore()
+    calls = _run(worker, store)
+
+    worker.handler(_event("req-1"), None)
+
+    assert calls[0][2] is None
 
 
 def test_duplicate_delivery_does_not_call_the_agent_twice(worker):

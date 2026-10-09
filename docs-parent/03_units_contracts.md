@@ -107,7 +107,17 @@
 |---|---|
 | `agentRuntimeArn` | UC-3 の ARN |
 | `runtimeSessionId` | 会話の `sessionId`（33文字以上） |
-| `payload` | `{"question": "<プロンプト>"}` の JSON。Agent は `prompt` キーも受ける |
+| `payload` | `{"question": "<プロンプト>", "location": {...}}` の JSON。Agent は `question` の代わりに `prompt` キーも受ける |
+
+### `location`（現在地のデータ）
+
+周辺の場所を探すツールが読む。座標を LLM にプロンプトから書き写させないため、プロンプトとは別に数値で渡す。位置が無い質問では省く。
+
+| キー | 型 | 必須 | 値 |
+|---|---|---|---|
+| `latitude` | number | ○ | 現在地（App の `start`） |
+| `longitude` | number | ○ | 同上 |
+| `headingDegrees` | number | | 進行方位（真北から時計回りの度）。プロンプトの「進行方向」と同じ値で、算出できたときだけ |
 
 ### プロンプトの形
 

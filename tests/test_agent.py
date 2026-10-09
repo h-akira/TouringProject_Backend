@@ -8,6 +8,7 @@ import json
 
 import pytest
 
+from lib import agent as agent_module
 from lib.agent import _extract_answer
 
 
@@ -31,6 +32,35 @@ def _tool_use_start() -> dict:
             }
         }
     }
+
+
+class _FakeClient:
+    def __init__(self):
+        self.kwargs = None
+
+    def invoke_agent_runtime(self, **kwargs):
+        self.kwargs = kwargs
+        return {"response": _FakeStream([_text("はい。")])}
+
+
+def test_location_is_sent_beside_the_question(monkeypatch):
+    client = _FakeClient()
+    monkeypatch.setattr(agent_module, "_client", client)
+    location = {"latitude": 35.6812, "longitude": 139.7671, "headingDegrees": 90.0}
+
+    agent_module.ask("質問: 右手は？", "touring-" + "a" * 32, location)
+
+    payload = json.loads(client.kwargs["payload"])
+    assert payload == {"question": "質問: 右手は？", "location": location}
+
+
+def test_no_location_key_without_a_position(monkeypatch):
+    client = _FakeClient()
+    monkeypatch.setattr(agent_module, "_client", client)
+
+    agent_module.ask("質問: 天気は？", "touring-" + "a" * 32)
+
+    assert json.loads(client.kwargs["payload"]) == {"question": "質問: 天気は？"}
 
 
 def test_text_deltas_are_joined():

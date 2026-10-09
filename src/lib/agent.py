@@ -15,7 +15,7 @@ Two things to know about the shape of this code:
 
 import json
 import os
-from typing import Any
+from typing import Any, Optional
 
 import boto3
 
@@ -72,11 +72,21 @@ def _extract_answer(stream: Any) -> str:
     return answer.strip()
 
 
-def ask(prompt: str, session_id: str) -> str:
-    """Send a prompt to the agent and return the assembled answer."""
+def ask(
+    prompt: str, session_id: str, location: Optional[dict[str, Any]] = None
+) -> str:
+    """Send a prompt to the agent and return the assembled answer.
+
+    `location` is the rider's position and heading as data, which the agent's
+    place tools read instead of the model's copy of the coordinates
+    (docs-parent/03_units_contracts.md UC-5).
+    """
+    payload: dict[str, Any] = {"question": prompt}
+    if location:
+        payload["location"] = location
     result = _client.invoke_agent_runtime(
         agentRuntimeArn=AGENT_ARN,
         runtimeSessionId=session_id,
-        payload=json.dumps({"question": prompt}).encode(),
+        payload=json.dumps(payload).encode(),
     )
     return _extract_answer(result["response"])

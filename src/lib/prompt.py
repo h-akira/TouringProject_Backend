@@ -69,12 +69,8 @@ def format_now(now: Optional[datetime] = None) -> str:
     )
 
 
-def describe_heading(lat: float, lon: float, end: Optional[dict]) -> Optional[str]:
-    """Describe the direction of travel, and which way is left and right.
-
-    The bearing is computed here rather than described to the model as two
-    coordinate pairs: it is plain trigonometry, and the model places coordinates
-    unreliably (docs/01_architecture.md section 2).
+def heading_degrees(lat: float, lon: float, end: Optional[dict]) -> Optional[float]:
+    """Bearing of travel in degrees from north, or None when there is none.
 
     Note the direction the two points are read in. `start` is the rider's
     current position (it is what the address is resolved from), so `end` is the
@@ -98,7 +94,19 @@ def describe_heading(lat: float, lon: float, end: Optional[dict]) -> Optional[st
     if haversine_distance(previous, current) < MIN_DISTANCE_METERS:
         return None
 
-    bearing = calculate_bearing(previous, current)
+    return calculate_bearing(previous, current)
+
+
+def describe_heading(lat: float, lon: float, end: Optional[dict]) -> Optional[str]:
+    """Describe the direction of travel, and which way is left and right.
+
+    The bearing is computed here rather than described to the model as two
+    coordinate pairs: it is plain trigonometry, and the model places coordinates
+    unreliably (docs/01_architecture.md section 2).
+    """
+    bearing = heading_degrees(lat, lon, end)
+    if bearing is None:
+        return None
     # Spelled out for the model, which is told not to work directions out for
     # itself (see the agent's system prompt).
     return (
@@ -106,6 +114,27 @@ def describe_heading(lat: float, lon: float, end: Optional[dict]) -> Optional[st
         f"ライダーから見て右手は{relative_direction(bearing, 90)}、"
         f"左手は{relative_direction(bearing, -90)}の方角"
     )
+
+
+def agent_location(start: Optional[dict], end: Optional[dict]) -> Optional[dict]:
+    """The rider's position and heading as data, for the agent's place tools.
+
+    The prompt already states both in words, but a tool must not read them
+    back through the model: copying coordinates is exactly what the model gets
+    wrong. So they travel beside the prompt in the payload
+    (docs-parent/03_units_contracts.md UC-5). None when there is no position.
+    """
+    if not isinstance(start, dict):
+        return None
+    lat, lon = start.get("latitude"), start.get("longitude")
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return None
+
+    location: dict[str, Any] = {"latitude": lat, "longitude": lon}
+    heading = heading_degrees(lat, lon, end)
+    if heading is not None:
+        location["headingDegrees"] = round(heading, 1)
+    return location
 
 
 def build(

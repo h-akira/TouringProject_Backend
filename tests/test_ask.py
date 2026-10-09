@@ -53,12 +53,17 @@ def _call(ask, body, capture=None, fail_on=None):
     `capture` collects what would have been persisted/sent, so a test can
     assert on the prompt without a real table.
     """
-    def fake_create_pending(request_id, session_id, prompt):
+    def fake_create_pending(request_id, session_id, prompt, agent_location=None):
         if fail_on == "store":
             raise RuntimeError("table unavailable")
         if capture is not None:
             capture.update(
-                {"requestId": request_id, "sessionId": session_id, "prompt": prompt}
+                {
+                    "requestId": request_id,
+                    "sessionId": session_id,
+                    "prompt": prompt,
+                    "agentLocation": agent_location,
+                }
             )
 
     def fake_send_message(**kwargs):
@@ -180,6 +185,33 @@ def test_heading_is_resolved_before_the_prompt_is_built(ask):
     assert "進行方向: 北" in prompt
     assert "右手は東" in prompt
     assert "左手は西" in prompt
+
+
+def test_location_is_stored_as_data_for_the_agent(ask):
+    # The agent's place tools read this, not the model's copy of the numbers.
+    capture: dict = {}
+    _call(
+        ask,
+        {
+            "question": "右手に見える公園は？",
+            "start": {"latitude": 36.0, "longitude": 139.0},
+            "end": {"latitude": 35.0, "longitude": 139.0},
+        },
+        capture=capture,
+    )
+
+    assert capture["agentLocation"] == {
+        "latitude": 36.0,
+        "longitude": 139.0,
+        "headingDegrees": 0.0,
+    }
+
+
+def test_no_location_data_without_a_position(ask):
+    capture: dict = {}
+    _call(ask, {"question": "今日の天気は？"}, capture=capture)
+
+    assert capture["agentLocation"] is None
 
 
 def test_heading_is_not_reversed(ask):

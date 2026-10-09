@@ -31,8 +31,11 @@ def _process(request_id: str) -> None:
         store.save_error(request_id, "The question was incomplete.")
         return
 
+    # Back to int/float: DynamoDB returns Decimal, which json.dumps rejects.
+    location = store.from_dynamo_numbers(record.get("agentLocation")) or None
+
     try:
-        answer = agent.ask(str(prompt), str(session_id))
+        answer = agent.ask(str(prompt), str(session_id), location)
     except Exception as error:  # noqa: BLE001 - the rider gets one shape
         # Logged for CloudWatch; the stored message is what the app shows, so
         # it must not name internal resources.

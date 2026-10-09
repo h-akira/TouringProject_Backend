@@ -53,9 +53,10 @@ class _FakeStore:
     def get(self, _request_id):
         return self.record
 
-    def start_pending(self, _request_id, prompt, transcript):
+    def start_pending(self, _request_id, prompt, transcript, agent_location=None):
         self.prompt = prompt
         self.transcript = transcript
+        self.agent_location = agent_location
 
     def save_error(self, _request_id, message, transcript=None):
         self.saved_error = message
@@ -143,6 +144,12 @@ def test_heading_is_settled_for_a_recorded_question_too(transcribe_done):
 
     assert "進行方向: 北" in store.prompt
     assert "右手は東" in store.prompt
+    # The same position and heading go to the agent as data.
+    assert store.agent_location == {
+        "latitude": 36.0,
+        "longitude": 139.0,
+        "headingDegrees": 0.0,
+    }
 
 
 def test_failed_transcription_tells_the_rider(transcribe_done):

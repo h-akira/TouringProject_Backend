@@ -42,6 +42,8 @@ App が結果を取りに来るまでの一時的な置き場。
 | `status` | S | ○ | `transcribing` / `pending` / `processing` / `done` / `error` |
 | `sessionId` | S | ○ | 会話 ID。回答と一緒に App へ返す |
 | `location` | M | | 音声の質問だけ。`transcribing` の間だけ持つ座標（下記） |
+| `prompt` | S | | Agent に渡すプロンプト（座標・住所を含む）。`pending` から回答・失敗まで |
+| `agentLocation` | M | | Agent に渡す現在地のデータ（契約 UC-5 の `location`）。`prompt` と同じ期間だけ持つ |
 | `transcript` | S | | 音声の質問だけ。文字起こしの結果（無音なら空文字）。App に返し、録音の聞き直しの横に出す |
 | `answer` | S | | `done` のときだけ |
 | `audioKey` | S | | 回答の音声の S3 キー。合成に失敗すると無い（回答は返る） |
@@ -50,10 +52,10 @@ App が結果を取りに来るまでの一時的な置き場。
 | `claimedAt` | N | | worker が処理を始めた時刻。取り残しの検出に使う |
 | `expiresAt` | N | ○ | TTL。`createdAt` ＋ 1時間 |
 
-### 音声の質問だけ `location` を持つ
+### 座標を持つ期間
 
-テキストの質問は、住所を解決してからレコードを書くので座標を残さない。
-音声は文字起こしが終わるまで質問の中身が無くプロンプトを組めないので、座標をいったん保存し、`transcribe-done` で住所・方位を確定してプロンプトを組み、`location` を削除する。
+`prompt` と `agentLocation` は worker が Agent を呼ぶために持ち、回答か失敗を書くときに消す。
+音声は文字起こしが終わるまで質問の中身が無くプロンプトを組めないので、座標を `location` にいったん保存し、`transcribe-done` で住所・方位を確定してプロンプトを組み、`location` を削除する。
 
 ### 状態遷移
 

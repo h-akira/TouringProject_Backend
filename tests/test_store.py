@@ -153,6 +153,48 @@ def test_saving_an_error_drops_the_prompt(store):
     assert "REMOVE prompt" in table.updates[0]["UpdateExpression"]
 
 
+@pytest.mark.parametrize("finish", ["answer", "error"])
+def test_finishing_drops_the_agent_location(store, finish):
+    # The coordinates have no use once the agent has been called.
+    table = _use(store, _FakeTable())
+    if finish == "answer":
+        store.save_answer("req-1", "それは日比谷公園です")
+    else:
+        store.save_error("req-1", "The agent could not be reached.")
+
+    assert "agentLocation" in table.updates[0]["UpdateExpression"].split("REMOVE")[1]
+
+
+def test_agent_location_is_stored_with_the_prompt(store):
+    table = _use(store, _FakeTable())
+    store.create_pending(
+        "req-1", SESSION_ID, "質問: 右手は？",
+        {"latitude": 35.6812, "longitude": 139.7671, "headingDegrees": 90.0},
+    )
+
+    from decimal import Decimal
+
+    assert table.item["agentLocation"]["latitude"] == Decimal("35.6812")
+
+
+def test_no_agent_location_attribute_without_a_position(store):
+    table = _use(store, _FakeTable())
+    store.create_pending("req-1", SESSION_ID, "質問: 天気は？")
+
+    assert "agentLocation" not in table.item
+
+
+def test_a_transcribed_question_stores_the_agent_location(store):
+    table = _use(store, _FakeTable())
+    store.start_pending(
+        "req-1", "質問: 右手は？", "右手は？", {"latitude": 35.0, "longitude": 139.0}
+    )
+
+    update = table.updates[0]
+    assert "agentLocation = :agentLocation" in update["UpdateExpression"]
+    assert "REMOVE #loc" in update["UpdateExpression"]
+
+
 def test_starting_a_transcribed_question_keeps_the_transcript(store):
     # The prompt goes once answered; the transcript has to outlive it.
     table = _use(store, _FakeTable())

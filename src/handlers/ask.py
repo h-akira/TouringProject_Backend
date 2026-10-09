@@ -97,11 +97,12 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     prompt = prompt_builder.build(
         question, body.get("start"), body.get("end"), body.get("elapsedSeconds")
     )
+    agent_location = prompt_builder.agent_location(body.get("start"), body.get("end"))
     geocode_ms = (time.monotonic() - started) * 1000
 
     request_id = str(uuid.uuid4())
     try:
-        store.create_pending(request_id, session_id, prompt)
+        store.create_pending(request_id, session_id, prompt, agent_location)
         _sqs.send_message(
             QueueUrl=QUEUE_URL,
             MessageBody=json.dumps({"requestId": request_id}),

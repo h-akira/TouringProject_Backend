@@ -97,9 +97,12 @@ def _process(job_name: str, status: str) -> None:
         location.get("end"),
         location.get("elapsedSeconds"),
     )
+    agent_location = prompt_builder.agent_location(
+        location.get("start"), location.get("end")
+    )
 
     try:
-        store.start_pending(job_name, prompt, question)
+        store.start_pending(job_name, prompt, question, agent_location)
         _queue(job_name)
     except Exception as error:  # noqa: BLE001 - one shape for the rider
         print(f"failed to queue transcribed question: {type(error).__name__}: {error}")
