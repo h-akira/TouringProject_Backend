@@ -129,19 +129,29 @@ def create_pending_audio(
     )
 
 
-def start_pending(request_id: str, prompt: str) -> None:
+def start_pending(request_id: str, prompt: str, transcript: str) -> None:
     """Move a transcribed question into the queue-able state.
 
     Mirrors what create_pending writes for a typed question: once the prompt
     exists the two paths are indistinguishable, so the worker needs no notion
     of where the question came from. The coordinates go at the same time - they
     have served their purpose, and the prompt carries the address instead.
+
+    The transcript is kept apart from the prompt, which is removed once
+    answered: it is returned to the app so the rider can see what the recording
+    was heard as (docs-parent/04_api_openapi.yaml).
     """
     _table().update_item(
         Key=_key(request_id),
-        UpdateExpression="SET #s = :pending, prompt = :prompt REMOVE #loc",
+        UpdateExpression=(
+            "SET #s = :pending, prompt = :prompt, transcript = :transcript REMOVE #loc"
+        ),
         ExpressionAttributeNames={"#s": "status", "#loc": "location"},
-        ExpressionAttributeValues={":pending": "pending", ":prompt": prompt},
+        ExpressionAttributeValues={
+            ":pending": "pending",
+            ":prompt": prompt,
+            ":transcript": transcript,
+        },
     )
 
 
@@ -210,13 +220,26 @@ def save_answer(
     )
 
 
-def save_error(request_id: str, message: str) -> None:
-    """Record a failure. `message` is shown to the rider, so keep it generic."""
+def save_error(
+    request_id: str, message: str, transcript: Optional[str] = None
+) -> None:
+    """Record a failure. `message` is shown to the rider, so keep it generic.
+
+    `transcript` is for a recording that transcribed to nothing: storing the
+    empty string tells the app the recording was heard and was silent, rather
+    than leaving it to guess from the message.
+    """
+    expression = "SET #s = :error, #e = :message"
+    values: dict[str, Any] = {":error": "error", ":message": message}
+    if transcript is not None:
+        expression += ", transcript = :transcript"
+        values[":transcript"] = transcript
+
     _table().update_item(
         Key=_key(request_id),
-        UpdateExpression="SET #s = :error, #e = :message REMOVE prompt",
+        UpdateExpression=f"{expression} REMOVE prompt",
         ExpressionAttributeNames={"#s": "status", "#e": "error"},
-        ExpressionAttributeValues={":error": "error", ":message": message},
+        ExpressionAttributeValues=values,
     )
 
 

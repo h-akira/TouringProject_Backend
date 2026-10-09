@@ -42,6 +42,7 @@ App が結果を取りに来るまでの一時的な置き場。
 | `status` | S | ○ | `transcribing` / `pending` / `processing` / `done` / `error` |
 | `sessionId` | S | ○ | 会話 ID。回答と一緒に App へ返す |
 | `location` | M | | 音声の質問だけ。`transcribing` の間だけ持つ座標（下記） |
+| `transcript` | S | | 音声の質問だけ。文字起こしの結果（無音なら空文字）。App に返し、録音の聞き直しの横に出す |
 | `answer` | S | | `done` のときだけ |
 | `audioKey` | S | | 回答の音声の S3 キー。合成に失敗すると無い（回答は返る） |
 | `error` | S | | `error` のときだけ。利用者に見せる文言（内部情報は入れない） |

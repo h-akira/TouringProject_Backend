@@ -77,8 +77,13 @@ def _process(job_name: str, status: str) -> None:
     question = _read_transcript(job_name)
     if not question:
         # A recording of silence transcribes to nothing. Asking the agent about
-        # an empty question would cost a call and answer nothing.
-        store.save_error(job_name, "Nothing could be heard in the recording.")
+        # an empty question would cost a call and answer nothing. Logged so a
+        # recording that never reached the agent is visible in the logs - a mic
+        # mode that picks up nothing on some phones lands here.
+        print(f"empty transcript for {job_name}")
+        store.save_error(
+            job_name, "Nothing could be heard in the recording.", transcript=""
+        )
         return
 
     # ⚠️ Back to int/float first. DynamoDB returns numbers as Decimal, and
@@ -94,7 +99,7 @@ def _process(job_name: str, status: str) -> None:
     )
 
     try:
-        store.start_pending(job_name, prompt)
+        store.start_pending(job_name, prompt, question)
         _queue(job_name)
     except Exception as error:  # noqa: BLE001 - one shape for the rider
         print(f"failed to queue transcribed question: {type(error).__name__}: {error}")

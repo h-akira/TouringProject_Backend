@@ -47,16 +47,19 @@ class _FakeStore:
             }
         )
         self.prompt = None
+        self.transcript = None
         self.saved_error = None
 
     def get(self, _request_id):
         return self.record
 
-    def start_pending(self, _request_id, prompt):
+    def start_pending(self, _request_id, prompt, transcript):
         self.prompt = prompt
+        self.transcript = transcript
 
-    def save_error(self, _request_id, message):
+    def save_error(self, _request_id, message, transcript=None):
         self.saved_error = message
+        self.transcript = transcript
 
     # Delegated to the real implementation rather than stubbed: the conversion
     # is the thing under test in test_the_address_survives_a_round_trip, and a
@@ -160,6 +163,29 @@ def test_silence_is_not_sent_to_the_agent(transcribe_done):
 
     assert store.saved_error is not None
     assert queued == []
+
+
+def test_the_transcript_is_kept_for_the_app(transcribe_done):
+    # Returned to the app so the rider can check what the recording was heard as.
+    store = _FakeStore()
+    _run(transcribe_done, store)
+
+    assert store.transcript == "この山は何ですか"
+
+
+def test_silence_is_kept_as_an_empty_transcript(transcribe_done):
+    # Empty, not absent: "heard nothing" rather than "not transcribed yet".
+    store = _FakeStore()
+    _run(transcribe_done, store, transcript=_transcript(""))
+
+    assert store.transcript == ""
+
+
+def test_silence_is_logged(transcribe_done, capsys):
+    # Otherwise a recording that picked up nothing leaves no trace in the logs.
+    _run(transcribe_done, _FakeStore(), transcript=_transcript(""))
+
+    assert "empty transcript for req-1" in capsys.readouterr().out
 
 
 def test_unreadable_transcript_is_reported(transcribe_done):

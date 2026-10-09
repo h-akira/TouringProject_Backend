@@ -83,6 +83,44 @@ def test_error_is_reported_as_a_200_with_a_status(result):
     assert body["error"]
 
 
+def test_the_transcript_comes_back_with_the_answer(result):
+    response = _call(
+        result,
+        {
+            "status": "done",
+            "answer": "それは富士山です",
+            "transcript": "あの山は何",
+            "sessionId": SESSION_ID,
+        },
+    )
+
+    assert json.loads(response["body"])["transcript"] == "あの山は何"
+
+
+def test_an_empty_transcript_comes_back_with_the_error(result):
+    # Empty means "heard nothing" - the app shows that next to the recording.
+    response = _call(
+        result,
+        {
+            "status": "error",
+            "error": "Nothing could be heard in the recording.",
+            "transcript": "",
+            "sessionId": SESSION_ID,
+        },
+    )
+
+    assert json.loads(response["body"])["transcript"] == ""
+
+
+def test_a_typed_question_has_no_transcript(result):
+    response = _call(
+        result,
+        {"status": "done", "answer": "それは富士山です", "sessionId": SESSION_ID},
+    )
+
+    assert "transcript" not in json.loads(response["body"])
+
+
 def test_an_abandoned_question_is_reported_as_an_error(result):
     # A worker killed by a timeout records nothing, and once the queue's
     # retries are spent nothing will move the record again. Reporting it as

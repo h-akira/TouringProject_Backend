@@ -153,6 +153,30 @@ def test_saving_an_error_drops_the_prompt(store):
     assert "REMOVE prompt" in table.updates[0]["UpdateExpression"]
 
 
+def test_starting_a_transcribed_question_keeps_the_transcript(store):
+    # The prompt goes once answered; the transcript has to outlive it.
+    table = _use(store, _FakeTable())
+    store.start_pending("req-1", "質問: この山は何", "この山は何")
+
+    update = table.updates[0]
+    assert "transcript = :transcript" in update["UpdateExpression"]
+    assert update["ExpressionAttributeValues"][":transcript"] == "この山は何"
+
+
+def test_an_error_can_carry_an_empty_transcript(store):
+    table = _use(store, _FakeTable())
+    store.save_error("req-1", "Nothing could be heard in the recording.", transcript="")
+
+    assert table.updates[0]["ExpressionAttributeValues"][":transcript"] == ""
+
+
+def test_an_error_without_a_transcript_leaves_it_alone(store):
+    table = _use(store, _FakeTable())
+    store.save_error("req-1", "The agent could not be reached.")
+
+    assert "transcript" not in table.updates[0]["UpdateExpression"]
+
+
 def test_get_returns_none_when_absent(store):
     _use(store, _FakeTable())
     assert store.get("req-1") is None

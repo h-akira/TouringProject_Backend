@@ -54,6 +54,20 @@ _s3 = boto3.client(
 )
 
 
+def _with_transcript(body: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    """Add what a recording was heard as, whatever the status.
+
+    Present only for recorded questions, once transcribed; an empty string
+    means nothing could be heard (docs-parent/04_api_openapi.yaml). The app
+    keeps it next to the recording so the rider can tell a bad recording from
+    a misheard one.
+    """
+    transcript = item.get("transcript")
+    if isinstance(transcript, str):
+        body["transcript"] = transcript
+    return body
+
+
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
     return {
         "statusCode": status,
@@ -93,26 +107,32 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         audio_url = _audio_url(item.get("audioKey"))
         if audio_url:
             body["audioUrl"] = audio_url
-        return _response(200, body)
+        return _response(200, _with_transcript(body, item))
 
     if status == "error":
         return _response(
             200,
-            {
-                "status": "error",
-                "error": item.get("error", "The question could not be answered."),
-                "sessionId": session_id,
-            },
+            _with_transcript(
+                {
+                    "status": "error",
+                    "error": item.get("error", "The question could not be answered."),
+                    "sessionId": session_id,
+                },
+                item,
+            ),
         )
 
     if status == "processing" and _is_abandoned(item):
         return _response(
             200,
-            {
-                "status": "error",
-                "error": "The question could not be answered.",
-                "sessionId": session_id,
-            },
+            _with_transcript(
+                {
+                    "status": "error",
+                    "error": "The question could not be answered.",
+                    "sessionId": session_id,
+                },
+                item,
+            ),
         )
 
     # ⚠️ A recording whose transcription never reported back. EventBridge is
@@ -130,7 +150,9 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             },
         )
 
-    return _response(200, {"status": "pending", "sessionId": session_id})
+    return _response(
+        200, _with_transcript({"status": "pending", "sessionId": session_id}, item)
+    )
 
 
 def _audio_url(audio_key: Any) -> Optional[str]:
